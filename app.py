@@ -8,6 +8,11 @@ from langchain_core.vectorstores import InMemoryVectorStore
 import bs4
 from langchain_community.document_loaders import WebBaseLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain import hub
+from langchain_core.documents import Document
+from typing_extensions import List, TypedDict
+from langgraph.graph import START, StateGraph
+from IPython.display import Image, display
 
 
 #environment variables
@@ -56,3 +61,54 @@ document_ids = vector_store.add_documents(documents=all_splits)
 
 print(document_ids[:3])
 
+prompt = hub.pull("rlm/rag-prompt")
+
+example_messages = prompt.invoke(
+    {"context": "(context goes here)", "question": "(question goes here)"}
+).to_messages()
+
+assert len(example_messages) == 1
+print(example_messages[0].content)
+
+#State of the application
+class State(TypedDict):
+    question: str
+    context: List[Document]
+    answer: str
+
+#nodes for the application (application steps)
+def retrieve(state: State):
+    retrieved_docs = vector_store.similarity_search(state["question"])
+    return {"context": retrieved_docs}
+
+
+def generate(state: State):
+    docs_content = "\n\n".join(doc.page_content for doc in state["context"])
+    messages = prompt.invoke({"question": state["question"], "context": docs_content})
+    response = llm.invoke(messages)
+    return {"answer": response.content}
+
+# Build the state graph
+graph_builder = StateGraph(State).add_sequence([retrieve, generate])
+graph_builder.add_edge(START, "retrieve")
+graph = graph_builder.compile()
+
+display(Image(graph.get_graph().draw_mermaid_png()))
+
+# Run the graph with a sample question
+result = graph.invoke({"question": "What is Task Decomposition?"})
+
+print(f'Context: {result["context"]}\n\n')
+print(f'Answer: {result["answer"]}')
+
+# Stream the graph to see updates in real-time
+""" for step in graph.stream(
+    {"question": "What is Task Decomposition?"}, stream_mode="updates"
+):
+    print(f"{step}\n\n----------------\n")
+ """
+#stream the messages from the graph
+for message, metadata in graph.stream(
+    {"question": "What is Task Decomposition?"}, stream_mode="messages"
+):
+    print(message.content, end="|")
