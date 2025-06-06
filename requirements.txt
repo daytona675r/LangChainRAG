@@ -2,3 +2,6 @@ python-dotenv
 langchain
 langchain-openai
 openai
+bs4
+ipython
+typing-extensions
